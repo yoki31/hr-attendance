@@ -2,13 +2,27 @@
 # Copyright 2021 Landoo Sistemas de Informacion SL
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 
+import datetime
+
 from odoo.tests import common
 
+from odoo.addons.resource.tests.common import TestResourceCommon
 
-class TestHrAttendanceReportTheoreticalTime(common.SavepointCase):
+
+class TestHrAttendanceReportTheoreticalTimeBase(common.SavepointCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        cls.env = cls.env(
+            context=dict(
+                cls.env.context,
+                mail_create_nolog=True,
+                mail_create_nosubscribe=True,
+                mail_notrack=True,
+                no_reset_password=True,
+                tracking_disable=True,
+            )
+        )
         cls.HrLeave = cls.env["hr.leave"]
         cls.HrHolidaysPublic = cls.env["hr.holidays.public"]
         cls.HrLeaveType = cls.env["hr.leave.type"]
@@ -48,6 +62,7 @@ class TestHrAttendanceReportTheoreticalTime(common.SavepointCase):
                 "state_id": cls.env.ref("base.state_es_cr").id,
             }
         )
+        cls.env.company.resource_calendar_id = cls.calendar
         cls.employee_1 = cls.env["hr.employee"].create(
             {
                 "name": "Employee 1",
@@ -137,6 +152,8 @@ class TestHrAttendanceReportTheoreticalTime(common.SavepointCase):
                     )
                 )
 
+
+class TestHrAttendanceReportTheoreticalTime(TestHrAttendanceReportTheoreticalTimeBase):
     def test_theoretical_hours(self):
         # EMPLOYEE 1
         # 1946-12-23
@@ -168,7 +185,9 @@ class TestHrAttendanceReportTheoreticalTime(common.SavepointCase):
     def test_theoretical_hours_recompute(self):
         """Change calendar, and then recompute with the wizard"""
         # Get rid of 4 hours per day so the theoretical should be 4.
-        self.calendar.attendance_ids.filtered(lambda x: x.hour_from == 14.0).unlink()
+        self.employee_1.resource_calendar_id.attendance_ids.filtered(
+            lambda x: x.hour_from == 14.0
+        ).unlink()
         # The attendances theoretical hours remain at 8 if not recomputed
         self.assertEqual(self.attendances[0].theoretical_hours, 8)
         self.assertEqual(self.attendances[1].theoretical_hours, 8)
@@ -267,3 +286,121 @@ class TestHrAttendanceReportTheoreticalTime(common.SavepointCase):
         self.assertEqual(
             report["domain"], [("employee_id", "in", [self.employee_1.id])]
         )
+
+
+class TestHrAttendanceReportTheoreticalTimeResource(TestResourceCommon):
+    def setUp(self):
+        super().setUp()
+        self.env.company.resource_calendar_id = self.calendar_jules
+        self.employee = self.env["hr.employee"].create(
+            {"name": "Employee", "resource_calendar_id": self.calendar_jules.id}
+        )
+        # 2 weeks calendar with date_from and date_to to check work_hours
+        self.employee.resource_calendar_id.attendance_ids.unlink()
+        self.employee.resource_calendar_id.write(
+            {
+                "attendance_ids": [
+                    (
+                        0,
+                        0,
+                        {
+                            "name": "Monday (morning)",
+                            "day_period": "morning",
+                            "dayofweek": "0",
+                            "week_type": "0",
+                            "hour_from": 8.0,
+                            "hour_to": 12.0,
+                            "date_from": "2022-01-01",
+                            "date_to": "2022-01-16",
+                        },
+                    ),
+                    (
+                        0,
+                        0,
+                        {
+                            "name": "Monday (morning)",
+                            "day_period": "morning",
+                            "dayofweek": "0",
+                            "week_type": "0",
+                            "hour_from": 8.0,
+                            "hour_to": 12.0,
+                            "date_from": "2022-01-17",
+                        },
+                    ),
+                    (
+                        0,
+                        0,
+                        {
+                            "name": "Monday (afternoon)",
+                            "day_period": "afternoon",
+                            "dayofweek": "0",
+                            "week_type": "0",
+                            "hour_from": 16.0,
+                            "hour_to": 20.0,
+                            "date_from": "2022-01-17",
+                        },
+                    ),
+                    (
+                        0,
+                        0,
+                        {
+                            "name": "Monday (morning)",
+                            "day_period": "morning",
+                            "dayofweek": "0",
+                            "week_type": "1",
+                            "hour_from": 8.0,
+                            "hour_to": 12.0,
+                            "date_from": "2022-01-01",
+                            "date_to": "2022-01-16",
+                        },
+                    ),
+                    (
+                        0,
+                        0,
+                        {
+                            "name": "Monday (afternoon)",
+                            "day_period": "afternoon",
+                            "dayofweek": "0",
+                            "week_type": "1",
+                            "hour_from": 16.0,
+                            "hour_to": 20.0,
+                            "date_from": "2022-01-01",
+                            "date_to": "2022-01-16",
+                        },
+                    ),
+                    (
+                        0,
+                        0,
+                        {
+                            "name": "Monday (morning)",
+                            "day_period": "morning",
+                            "dayofweek": "0",
+                            "week_type": "1",
+                            "hour_from": 8.0,
+                            "hour_to": 12.0,
+                            "date_from": "2022-01-17",
+                        },
+                    ),
+                    (
+                        0,
+                        0,
+                        {
+                            "name": "Monday (afternoon)",
+                            "day_period": "afternoon",
+                            "dayofweek": "0",
+                            "week_type": "1",
+                            "hour_from": 16.0,
+                            "hour_to": 20.0,
+                            "date_from": "2022-01-17",
+                        },
+                    ),
+                ],
+            }
+        )
+
+    def test_theoretical_time_report_two_weeks(self):
+        obj = self.env["hr.attendance.theoretical.time.report"]
+        hours = obj._theoretical_hours(self.employee, datetime.date(2022, 1, 10))
+        self.assertEqual(hours, 4)
+        hours = obj._theoretical_hours(self.employee, datetime.date(2022, 1, 17))
+        self.assertEqual(hours, 8)
